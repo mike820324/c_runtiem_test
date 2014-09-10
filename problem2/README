@@ -1,0 +1,7 @@
+This problem is testing whether you can distinguish between an array string and literal string.
+for example:
+	char *ptr = "hello World\n"
+	char array[] = "Hello World\n"
+
+What is the difference between these two.
+

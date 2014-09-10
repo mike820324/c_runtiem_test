@@ -1,0 +1,153 @@
+I. Introduction:
+  This serices of posts will focus on understanding the technical detailed from c, SSL, linux to Android. 
+  Before discussing some further technical detail, I will first show some source code or exploit that contains some bug or utilize a bug. 
+  By understanding the important priciple of causing these bug, we can fix the code and prevent this kind of issue happend in our code again.
+  
+  The beginning of this series is focus on C. Each post will contins some import principle when you writing/debugging your c code.
+
+
+II. Problem:
+  Let's begin, consider the following c code and guess the output.
+  
+    #include <stdio.h>
+    int *foo() 
+    {
+    	int a = 20;
+    	return &a;
+    }
+    
+    int main() 
+    {
+    	int *ptr = NULL;
+    	ptr = foo();
+    	/* printing out the return value */
+    	printf("%d\n", *ptr);
+    }
+  
+  Well, if you compile and run the program, you will see the output is 20. 
+  But what happend if we slightly modify the above code. 
+  Let's add a new function called bar.
+  
+  
+    #include <stdio.h>
+    int *foo() 
+    {
+    	int a = 20;
+    	return &a;
+    }
+    
+    
+    int bar(int a, int b, int c) 
+    {
+    	int test = a+b+c;
+    	return test;
+    }
+    
+    int main() 
+    {
+    	int *ptr = NULL;
+    	ptr = foo();
+    	bar(10, 20, 30);
+    	/* printing out the return value */
+    	printf("%d\n", *ptr);
+    }
+  
+  Run the program again, you will find out that the ouput of the program has changed.
+  So what happened, how come the value is changed.
+  The principle behind these two c code is the idea of local variable and the memory of variable.
+  What you will learn in this post is the idea of:
+    1. Variable Memory
+    2. Stack Frame
+    3. Local Variable
+    4. Global Variable
+    5. Static Variable
+
+  P.S
+  The above c code is only for demo purpose, no one will really write this kind of code (Return a local variable address)in reality.
+  A more complex situation may be passing a structure pointer to a function and assign some address to the fields of the structure.
+  In this case, the idea is the same, value of dereferencing each address may be unpredictable.
+
+III. Memory of Variable:
+A process virtual address space can be seperated into several sections, such as code section, data section, stack, heap and etc.
+To get some information about a process virtual address space in linux, simply type
+cat /proc/$pid/maps
+
+In C, the memory of an variable may within in three section which are
+1. data section
+2. stack
+3. heap
+
+The address of variable that is in data section are determine by compiler. That is the address is determine in compile time.
+On the other hand, the address of variable in stack or heap is determine in run time.
+As a result, there is no way to use some static analyze tools to find out the address of the variable in stack/heap.
+Let's took the following code as an example.
+
+#include <stdio.h>
+#include <stdlib.h>
+
+int main() {
+    /* variable in stack */
+    int stack_var = 10;
+    /* variable in heap */
+    int *heap_var = (int *)malloc(sizeof(int));
+    *heap_var = 20;
+
+    /* variable in data section */
+    static int data_var = 20;
+
+    /* print out the information so we can debug */
+    printf("\n");
+    printf("heap : 0x%x\n", heap_var);
+    printf("stack : 0x%x\n", &stack_var);
+    printf("data  : 0x%x\n", &data_var);
+
+    /* hang the process, so that we can dump the process virtual address space */
+    while(1) {
+    }
+    return 0;
+}
+
+Source Code Output:
+heap : 0x1214010
+stack : 0x4478f7e4
+data  : 0x600b40
+
+Virtual Address Output: (cat /proc/8723/maps)
+00400000-00401000 r-xp 00000000 fd:00 12717863                           /home/mike820324/Programming/test/c/runtime_bug/problem0/a.out
+00600000-00601000 rw-p 00000000 fd:00 12717863                           /home/mike820324/Programming/test/c/runtime_bug/problem0/a.out
+01214000-01235000 rw-p 00000000 00:00 0                                  [heap]
+7ff4b0af0000-7ff4b0ca5000 r-xp 00000000 08:02 36711                      /lib64/libc-2.15.so
+7ff4b0ca5000-7ff4b0ea5000 ---p 001b5000 08:02 36711                      /lib64/libc-2.15.so
+7ff4b0ea5000-7ff4b0ea9000 r--p 001b5000 08:02 36711                      /lib64/libc-2.15.so
+7ff4b0ea9000-7ff4b0eab000 rw-p 001b9000 08:02 36711                      /lib64/libc-2.15.so
+7ff4b0eab000-7ff4b0eb0000 rw-p 00000000 00:00 0
+7ff4b0eb0000-7ff4b0ed3000 r-xp 00000000 08:02 41300                      /lib64/ld-2.15.so
+7ff4b1097000-7ff4b109a000 rw-p 00000000 00:00 0
+7ff4b10d0000-7ff4b10d2000 rw-p 00000000 00:00 0
+7ff4b10d2000-7ff4b10d3000 r--p 00022000 08:02 41300                      /lib64/ld-2.15.so
+7ff4b10d3000-7ff4b10d5000 rw-p 00023000 08:02 41300                      /lib64/ld-2.15.so
+7fff44771000-7fff44792000 rw-p 00000000 00:00 0                          [stack]
+7fff447ff000-7fff44800000 r-xp 00000000 00:00 0                          [vdso]
+ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0                  [vsyscall]
+
+ELF section dump Output: (readelf -S a.out | grep .data)
+  [14] .rodata           PROGBITS         0000000000400818  00000818
+  [23] .data             PROGBITS         0000000000600b30  00000b30
+
+As you can see from the above output, heap_var address is 0x1214010 which is in the heap section(0x1214000 - 0x01235000).
+The stack_var is 0x4478f7e4 which is in the stack section(0x44771000 - 0x44792000).
+And finally, the data_var is 0x600b40 which is in the data section.
+Virtual Address Space:
+00600000-00601000 rw-p 00000000 fd:00 12717863                           /home/mike820324/Programming/test/c/runtime_bug/problem0/a.out
+ELF section info dump:
+[23] .data             PROGBITS         0000000000600b30  00000b30
+
+IV. Stack Frame:
+In the previous section, we have a breif understanding about the address of variable. 
+We now know that the variable in data section is determine by compiler, how about the variable in stack.
+The address of variable in stack can only determine 
+
+IV. Local Variable and Global Variable and Static Variable:
+We have heard these phrases for many times, but do we really understand the idea of all of them.
+
+
